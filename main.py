@@ -1,9 +1,52 @@
-# (위쪽 import 부분과 send_telegram_msg 함수 등은 그대로 두세요)
+import time
+import os
+import requests
+from datetime import datetime  # ★ 이 친구가 없어서 에러가 났던 겁니다!
+
+# 크롤링 도구
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+
+# ================= [설정] =================
+TARGET_AREAS = ["서해중부안쪽먼바다", "충남남부앞바다"]
+TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
+TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
+LOG_FILE = "last_sent.txt"
+# =========================================
+
+def send_telegram_msg(text):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print(">> 텔레그램 설정이 없습니다.")
+        return
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    params = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": text
+    }
+    try:
+        requests.get(url, params=params)
+        print(">> 텔레그램 전송 성공!")
+    except Exception as e:
+        print(f">> 전송 에러: {e}")
+
+def read_last_log():
+    if os.path.exists(LOG_FILE):
+        with open(LOG_FILE, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    return ""
+
+def save_current_log(content):
+    with open(LOG_FILE, "w", encoding="utf-8") as f:
+        f.write(content)
 
 def crawl_weather_site():
+    # ★ 여기서 datetime.now()를 쓰는데, 이제 위에서 import를 했으니 에러가 안 날 겁니다.
     print(f"[{datetime.now()}] 텔레그램 봇 작동 시작")
     
-    # ... (크롬 드라이버 설정 부분 생략, 그대로 두세요) ...
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
@@ -39,7 +82,7 @@ def crawl_weather_site():
         current_status = "/".join(found_data)
         last_status = read_last_log()
 
-        # 1. 특보 해제 또는 없음 (수정된 부분!)
+        # 1. 특보 해제 또는 없음 (생존 신고 포함)
         if not current_status:
             if last_status:
                 print(">> [해제] 모든 특보 해제됨.")
@@ -47,7 +90,7 @@ def crawl_weather_site():
                 save_current_log("")
             else:
                 print(">> 특보 없음 (생존 신고 발송)")
-                # ★ 여기가 추가된 부분입니다!
+                # ★ 생존 신고 메시지
                 send_telegram_msg("✅ [정상 작동 중]\n\n현재 서해안 지역에\n발효 중인 특보가 없습니다.\n\n(이상 무!)")
             return
 
