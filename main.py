@@ -91,7 +91,7 @@ def crawl_weather_site():
             else:
                 print(">> 특보 없음 (생존 신고 발송)")
                 # ★ 생존 신고 메시지
-                send_telegram_msg("✅ [정상 작동 중]\n\n현재 서해안 지역에\n발효 중인 특보가 없습니다.\n\n(이상 무!)")
+                # send_telegram_msg("✅ [정상 작동 중]\n\n현재 서해안 지역에\n발효 중인 특보가 없습니다.\n\n(이상 무!)")
             return
 
         # 2. 특보 발생/유지
