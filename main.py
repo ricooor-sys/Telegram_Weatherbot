@@ -168,9 +168,9 @@ def crawl_weather_site():
             return
 
         # [CASE 2] 특보가 있는데, 지난번과 똑같을 때 (중복)
-        if current_status_str == last_status_str:
-            print(">> [중복] 이미 보낸 특보입니다. 전송 생략.")
-            return
+        # if current_status_str == last_status_str:
+        #    print(">> [중복] 이미 보낸 특보입니다. 전송 생략.")
+        #    return
 
         # [CASE 3] 새로운 특보 발견! (메시지 전송)
         print(">> [신규] 상세 정보를 텔레그램으로 전송합니다.")
