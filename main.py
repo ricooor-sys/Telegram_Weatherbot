@@ -8,16 +8,14 @@ from datetime import datetime
 # ================= [설정] =================
 TARGET_AREAS = ["서해중부안쪽먼바다", "충남남부앞바다"]
 
-# ★ 중요: 직접 적지 말고 os.environ.get으로 변경! (보안 필수)
+# Public 저장소이므로 보안을 위해 Secrets에서 가져옵니다.
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 LOG_FILE = "last_sent.txt"
 # =========================================
 
-# ... (나머지 코드는 그대로 두시면 됩니다) ...
-# ... (install_heavy_libraries, send_telegram_msg 등 기존 로직 유지) ...
-
 def install_heavy_libraries():
+    """크롤링에 필요한 라이브러리 설치"""
     try:
         import selenium
         import webdriver_manager
@@ -42,24 +40,10 @@ def save_current_log(content):
     with open(LOG_FILE, "w", encoding="utf-8") as f:
         f.write(content)
 
-def should_i_run():
-    last_status = read_last_log()
-    if last_status:
-        print(">> [🚨 비상] 특보 발효 중 -> 15분 간격 감시")
-        return True
-    
-    now_minute = datetime.now().minute
-    if now_minute < 10:
-        print(f">> [🕒 정기] 1시간 간격 점검 시간 ({now_minute}분)")
-        return True
-        
-    print(f">> [💤 대기] 특보 없음. 정시까지 대기 ({now_minute}분)")
-    return False
-
 def crawl_weather_site():
-    print(f"[{datetime.now()}] 봇 실행 시작")
-    if not should_i_run(): return
+    print(f"[{datetime.now()}] 봇 실행 (24시간 상시 감시 모드)")
 
+    # 1. 무조건 라이브러리 설치 및 실행 (시간 계산 로직 제거됨)
     install_heavy_libraries()
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
@@ -67,6 +51,8 @@ def crawl_weather_site():
     from selenium.webdriver.chrome.service import Service
     from webdriver_manager.chrome import ChromeDriverManager
 
+    print(">> [작동] 기상청 정보를 확인합니다...")
+    
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
@@ -81,49 +67,82 @@ def crawl_weather_site():
 
         tbody = driver.find_element(By.CSS_SELECTOR, "table tbody")
         rows = tbody.find_elements(By.TAG_NAME, "tr")
+        
         found_unique_ids = []
         found_details_msg = []
         
-        last_type, last_level = "", ""
+        last_type = ""
+        last_level = ""
 
         for row in rows:
             cols = row.find_elements(By.TAG_NAME, "td")
             if len(cols) < 2: continue
+            
             col_idx = 0
             if len(cols) == 6:
-                last_type, last_level = cols[0].text.strip(), cols[1].text.strip()
+                last_type = cols[0].text.strip()
+                last_level = cols[1].text.strip()
                 col_idx = 2
-            elif len(cols) == 4: col_idx = 0
+            elif len(cols) == 4:
+                col_idx = 0
 
-            area, announce = cols[col_idx].text.strip(), cols[col_idx+1].text.strip()
-            effect, clear = cols[col_idx+2].text.strip(), cols[col_idx+3].text.strip()
+            area_text = cols[col_idx].text.strip()
+            announce_time = cols[col_idx+1].text.strip()
+            effect_time = cols[col_idx+2].text.strip()
+            clear_notice = cols[col_idx+3].text.strip()
             
             for target in TARGET_AREAS:
-                if target.replace(" ", "") in area.replace(" ", ""):
-                    unique_id = f"{target}_{last_type}_{announce}"
+                # 공백 제거 후 비교
+                if target.replace(" ", "") in area_text.replace(" ", ""):
+                    
+                    unique_id = f"{target}_{last_type}_{announce_time}"
                     found_unique_ids.append(unique_id)
-                    found_details_msg.append(
-                        f"특보 : {last_type}\n수준 : {last_level}\n해당지역 : {area}\n"
-                        f"발표시각 : {announce}\n발효시각 : {effect}\n해제예고 : {clear if clear else '-'}"
+                    
+                    detail_msg = (
+                        f"특보 : {last_type}\n"
+                        f"수준 : {last_level}\n"
+                        f"해당지역 : {area_text}\n"
+                        f"발표시각 : {announce_time}\n"
+                        f"발효시각 : {effect_time}\n"
+                        f"해제예고 : {clear_notice if clear_notice else '-'}"
                     )
+                    found_details_msg.append(detail_msg)
 
-        current_status = "/".join(found_unique_ids)
-        last_status = read_last_log()
+        current_status_str = "/".join(found_unique_ids)
+        last_status_str = read_last_log()
 
-        if not current_status:
-            if last_status:
-                send_telegram_msg("🌈 기상특보 해제 🌈\n\n지정된 구역의 모든 특보가 해제되었습니다.")
+        # [CASE 1] 특보 해제
+        if not current_status_str:
+            if last_status_str:
+                print(">> [해제] 특보가 해제되었습니다.")
+                send_telegram_msg("🌈 기상특보 해제 🌈\n\n지정된 구역의 모든 특보가 해제되었습니다.\n(상황 종료)")
                 save_current_log("")
+            else:
+                print(">> 특보 없음 (이상 무)")
             return
 
-        if current_status == last_status: return
+        # [CASE 2] 중복 체크 (계속 켜져 있으므로 매우 중요!)
+        if current_status_str == last_status_str:
+             print(">> [중복] 변동 사항 없음. (전송 생략)")
+             return
 
-        head_msg = f"감시구역: {TARGET_AREAS}\n\n새로운 특보가 발표되었습니다.\n" + "\n\n".join(found_details_msg)
+        # [CASE 3] 신규 특보 발생
+        print(">> [전송] 새로운 특보 알림 발송!")
+        
+        final_msg_body = "\n\n".join(found_details_msg)
+        head_msg = (
+            f"감시구역: {TARGET_AREAS}\n\n"
+            f"새로운 특보가 발표되었습니다.\n"
+            f"{final_msg_body}"
+        )
+        
         send_telegram_msg(head_msg)
-        save_current_log(current_status)
+        save_current_log(current_status_str)
 
-    except Exception as e: print(f"에러: {e}")
-    finally: driver.quit()
+    except Exception as e:
+        print(f"에러 발생: {e}")
+    finally:
+        driver.quit()
 
 if __name__ == "__main__":
     crawl_weather_site()
