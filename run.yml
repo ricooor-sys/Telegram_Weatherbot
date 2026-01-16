@@ -2,16 +2,16 @@ name: 기상 감시 봇
 
 on:
   schedule:
-    # 15분마다 무조건 깨웁니다 (0분, 15분, 30분, 45분)
-    # 실제 작동 여부는 파이썬 코드(main.py)가 똑똑하게 결정합니다.
+    # 15분마다 실행 (0분, 15분, 30분, 45분)
+    # 실제 작동 여부는 파이썬 코드(main.py)가 판단하여 자원을 절약합니다.
     - cron: '*/15 * * * *'
-  workflow_dispatch: # 수동 실행 버튼 추가
+  workflow_dispatch: # 수동 실행 버튼 (테스트용)
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # 기록 저장 권한
+      contents: write # 로그 파일(last_sent.txt) 저장을 위한 쓰기 권한
 
     steps:
       - name: 코드 가져오기
@@ -22,14 +22,18 @@ jobs:
         with:
           python-version: '3.9'
 
-      # 가벼운 requests만 먼저 설치 (시간 절약)
-      # 무거운 selenium은 파이썬 코드가 필요할 때만 설치함
+      # [중요] 가벼운 라이브러리(requests)만 먼저 설치합니다.
+      # 무거운 selenium 등은 main.py가 '작동해야 한다'고 판단할 때만 스스로 설치합니다.
+      # 이렇게 해야 대기 모드일 때 시간을 아낄 수 있습니다.
       - name: 기본 라이브러리 설치
         run: pip install requests
 
       - name: 봇 실행
-        # 사용자님의 토큰 정보는 이미 main.py 안에 들어있으므로
-        # 여기서는 별도의 env 설정이 필요 없습니다.
+        env:
+          # ★ 설정(Settings) -> Secrets에 등록한 값을 불러와서 파이썬에 전달합니다.
+          # 이제 코드가 공개(Public)되어도 안전합니다.
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
 
       - name: 기록 저장 (last_sent.txt)
