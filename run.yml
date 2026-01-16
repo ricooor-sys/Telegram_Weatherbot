@@ -1,0 +1,41 @@
+name: 기상 감시 봇
+
+on:
+  schedule:
+    # 15분마다 무조건 깨웁니다 (0분, 15분, 30분, 45분)
+    # 실제 작동 여부는 파이썬 코드(main.py)가 똑똑하게 결정합니다.
+    - cron: '*/15 * * * *'
+  workflow_dispatch: # 수동 실행 버튼 추가
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 기록 저장 권한
+
+    steps:
+      - name: 코드 가져오기
+        uses: actions/checkout@v3
+
+      - name: 파이썬 설정
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      # 가벼운 requests만 먼저 설치 (시간 절약)
+      # 무거운 selenium은 파이썬 코드가 필요할 때만 설치함
+      - name: 기본 라이브러리 설치
+        run: pip install requests
+
+      - name: 봇 실행
+        # 사용자님의 토큰 정보는 이미 main.py 안에 들어있으므로
+        # 여기서는 별도의 env 설정이 필요 없습니다.
+        run: python main.py
+
+      - name: 기록 저장 (last_sent.txt)
+        run: |
+          git config --global user.name "WeatherBot"
+          git config --global user.email "bot@noreply.github.com"
+          git add last_sent.txt || true
+          git commit -m "Update weather status log" || true
+          git push
