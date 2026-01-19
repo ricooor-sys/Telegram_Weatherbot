@@ -150,7 +150,7 @@ def crawl_weather_site():
         
         head_msg = (
             f"감시구역: {TARGET_AREAS}\n\n"
-            f"새로운 특보가 발표되었습니다.\n"
+            f"새로운 특보가 발표되었습니다.\n\n"
             f"{final_msg_body}"
         )
         
