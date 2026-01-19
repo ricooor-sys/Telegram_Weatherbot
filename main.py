@@ -6,21 +6,26 @@ import requests
 from datetime import datetime
 
 # ================= [설정] =================
-TARGET_AREAS = ["서해중부안쪽먼바다", "충남남부앞바다"]
+# ★ 원하시는 지역들을 여기에 모두 적어주세요.
+# 이 목록에 있는 단어가 포함될 때만 알림이 가고, 메시지에도 이 단어만 표시됩니다.
+TARGET_AREAS = [
+    "서해중부안쪽먼바다", 
+    "충남남부앞바다", 
+    "보령시"
+]
 
-# Public 저장소이므로 보안을 위해 Secrets에서 가져옵니다.
+# Public 저장소용 (Secrets에서 가져옴)
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 LOG_FILE = "last_sent.txt"
 # =========================================
 
 def install_heavy_libraries():
-    """크롤링에 필요한 라이브러리 설치"""
     try:
         import selenium
         import webdriver_manager
     except ImportError:
-        print(">> [설치] 필요한 라이브러리가 없어 설치합니다...")
+        print(">> [설치] 라이브러리 설치 중...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", "selenium", "webdriver-manager"])
 
 def send_telegram_msg(text):
@@ -41,17 +46,14 @@ def save_current_log(content):
         f.write(content)
 
 def crawl_weather_site():
-    print(f"[{datetime.now()}] 봇 실행 (24시간 상시 감시 모드)")
+    print(f"[{datetime.now()}] 봇 실행 (지역 필터링 적용 Ver.)")
 
-    # 1. 무조건 라이브러리 설치 및 실행 (시간 계산 로직 제거됨)
     install_heavy_libraries()
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
     from selenium.webdriver.common.by import By
     from selenium.webdriver.chrome.service import Service
     from webdriver_manager.chrome import ChromeDriverManager
-
-    print(">> [작동] 기상청 정보를 확인합니다...")
     
     chrome_options = Options()
     chrome_options.add_argument("--headless")
@@ -86,27 +88,42 @@ def crawl_weather_site():
             elif len(cols) == 4:
                 col_idx = 0
 
-            area_text = cols[col_idx].text.strip()
+            # 기상청 원본 텍스트 (엄청 김)
+            raw_area_text = cols[col_idx].text.strip()
             announce_time = cols[col_idx+1].text.strip()
             effect_time = cols[col_idx+2].text.strip()
             clear_notice = cols[col_idx+3].text.strip()
             
+            # ---------------------------------------------------------
+            # [핵심 로직] 우리 타겟 지역만 쏙쏙 뽑아내기
+            # ---------------------------------------------------------
+            matched_targets = []
+            
             for target in TARGET_AREAS:
-                # 공백 제거 후 비교
-                if target.replace(" ", "") in area_text.replace(" ", ""):
-                    
-                    unique_id = f"{target}_{last_type}_{announce_time}"
-                    found_unique_ids.append(unique_id)
-                    
-                    detail_msg = (
-                        f"특보 : {last_type}\n"
-                        f"수준 : {last_level}\n"
-                        f"해당지역 : {area_text}\n"
-                        f"발표시각 : {announce_time}\n"
-                        f"발효시각 : {effect_time}\n"
-                        f"해제예고 : {clear_notice if clear_notice else '-'}"
-                    )
-                    found_details_msg.append(detail_msg)
+                # 공백 제거 후 비교 (예: '보령 시' -> '보령시')
+                if target.replace(" ", "") in raw_area_text.replace(" ", ""):
+                    matched_targets.append(target)
+            
+            # 발견된 우리 지역이 하나라도 있으면 메시지 생성
+            if matched_targets:
+                # 1. 깔끔하게 정리된 지역명 만들기 (예: "서해중부안쪽먼바다, 보령시")
+                clean_area_text = ", ".join(matched_targets)
+                
+                # 2. ID 생성 (내 지역 목록이 바뀌었을 때만 알림 오도록)
+                unique_id = f"{clean_area_text}_{last_type}_{announce_time}"
+                found_unique_ids.append(unique_id)
+                
+                # 3. 메시지 작성 (원본 raw_area_text 대신 clean_area_text 사용)
+                detail_msg = (
+                    f"특보 : {last_type}\n"
+                    f"수준 : {last_level}\n"
+                    f"해당지역 : {clean_area_text}\n"  # 여기가 핵심! 깔끔하게 나옴
+                    f"발표시각 : {announce_time}\n"
+                    f"발효시각 : {effect_time}\n"
+                    f"해제예고 : {clear_notice if clear_notice else '-'}"
+                )
+                found_details_msg.append(detail_msg)
+            # ---------------------------------------------------------
 
         current_status_str = "/".join(found_unique_ids)
         last_status_str = read_last_log()
@@ -121,15 +138,16 @@ def crawl_weather_site():
                 print(">> 특보 없음 (이상 무)")
             return
 
-        # [CASE 2] 중복 체크 (계속 켜져 있으므로 매우 중요!)
+        # [CASE 2] 중복 체크 (변동 없으면 조용히)
         if current_status_str == last_status_str:
              print(">> [중복] 변동 사항 없음. (전송 생략)")
              return
 
-        # [CASE 3] 신규 특보 발생
-        print(">> [전송] 새로운 특보 알림 발송!")
+        # [CASE 3] 신규 특보 전송
+        print(">> [전송] 필터링된 특보 알림 발송!")
         
         final_msg_body = "\n\n".join(found_details_msg)
+        
         head_msg = (
             f"감시구역: {TARGET_AREAS}\n\n"
             f"새로운 특보가 발표되었습니다.\n"
