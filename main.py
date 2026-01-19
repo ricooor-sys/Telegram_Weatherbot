@@ -6,15 +6,12 @@ import requests
 from datetime import datetime
 
 # ================= [설정] =================
-# ★ 원하시는 지역들을 여기에 모두 적어주세요.
-# 이 목록에 있는 단어가 포함될 때만 알림이 가고, 메시지에도 이 단어만 표시됩니다.
 TARGET_AREAS = [
     "서해중부안쪽먼바다", 
     "충남남부앞바다", 
     "보령시"
 ]
 
-# Public 저장소용 (Secrets에서 가져옴)
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 LOG_FILE = "last_sent.txt"
@@ -46,7 +43,7 @@ def save_current_log(content):
         f.write(content)
 
 def crawl_weather_site():
-    print(f"[{datetime.now()}] 봇 실행 (지역 필터링 적용 Ver.)")
+    print(f"[{datetime.now()}] 봇 실행 (이모티콘 헤더 적용 Ver.)")
 
     install_heavy_libraries()
     from selenium import webdriver
@@ -88,67 +85,57 @@ def crawl_weather_site():
             elif len(cols) == 4:
                 col_idx = 0
 
-            # 기상청 원본 텍스트 (엄청 김)
             raw_area_text = cols[col_idx].text.strip()
             announce_time = cols[col_idx+1].text.strip()
             effect_time = cols[col_idx+2].text.strip()
             clear_notice = cols[col_idx+3].text.strip()
             
-            # ---------------------------------------------------------
-            # [핵심 로직] 우리 타겟 지역만 쏙쏙 뽑아내기
-            # ---------------------------------------------------------
             matched_targets = []
-            
             for target in TARGET_AREAS:
-                # 공백 제거 후 비교 (예: '보령 시' -> '보령시')
                 if target.replace(" ", "") in raw_area_text.replace(" ", ""):
                     matched_targets.append(target)
             
-            # 발견된 우리 지역이 하나라도 있으면 메시지 생성
             if matched_targets:
-                # 1. 깔끔하게 정리된 지역명 만들기 (예: "서해중부안쪽먼바다, 보령시")
                 clean_area_text = ", ".join(matched_targets)
-                
-                # 2. ID 생성 (내 지역 목록이 바뀌었을 때만 알림 오도록)
                 unique_id = f"{clean_area_text}_{last_type}_{announce_time}"
                 found_unique_ids.append(unique_id)
                 
-                # 3. 메시지 작성 (원본 raw_area_text 대신 clean_area_text 사용)
                 detail_msg = (
                     f"특보 : {last_type}\n"
                     f"수준 : {last_level}\n"
-                    f"해당지역 : {clean_area_text}\n"  # 여기가 핵심! 깔끔하게 나옴
+                    f"해당지역 : {clean_area_text}\n"
                     f"발표시각 : {announce_time}\n"
                     f"발효시각 : {effect_time}\n"
                     f"해제예고 : {clear_notice if clear_notice else '-'}"
                 )
                 found_details_msg.append(detail_msg)
-            # ---------------------------------------------------------
 
         current_status_str = "/".join(found_unique_ids)
         last_status_str = read_last_log()
 
-        # [CASE 1] 특보 해제
+        # [CASE 1] 특보 해제 (무지개 이모티콘 적용)
         if not current_status_str:
             if last_status_str:
                 print(">> [해제] 특보가 해제되었습니다.")
                 send_telegram_msg("🌈 기상특보 해제 🌈\n\n지정된 구역의 모든 특보가 해제되었습니다.\n(상황 종료)")
                 save_current_log("")
             else:
-                print(">> 특보 없음 (이상 무)")
+                print(">> 특보 없음")
             return
 
-        # [CASE 2] 중복 체크 (변동 없으면 조용히)
+        # [CASE 2] 중복 체크
         if current_status_str == last_status_str:
-             print(">> [중복] 변동 사항 없음. (전송 생략)")
+             print(">> [중복] 변동 사항 없음.")
              return
 
-        # [CASE 3] 신규 특보 전송
-        print(">> [전송] 필터링된 특보 알림 발송!")
+        # [CASE 3] 전송 (사이렌 이모티콘 적용!)
+        print(">> [전송] 알림 발송")
         
         final_msg_body = "\n\n".join(found_details_msg)
         
+        # ★ 수정된 부분: 사이렌 이모티콘 헤더 추가
         head_msg = (
+            f"🚨 기상특보 발표 🚨\n\n"
             f"감시구역: {TARGET_AREAS}\n\n"
             f"새로운 특보가 발표되었습니다.\n\n"
             f"{final_msg_body}"
@@ -158,7 +145,7 @@ def crawl_weather_site():
         save_current_log(current_status_str)
 
     except Exception as e:
-        print(f"에러 발생: {e}")
+        print(f"에러: {e}")
     finally:
         driver.quit()
 
