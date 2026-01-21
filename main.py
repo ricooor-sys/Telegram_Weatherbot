@@ -15,8 +15,10 @@ TARGET_AREAS = [
 
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
-# 파일명을 json으로 변경 (중요)
-LOG_FILE = "last_sent_data.json"
+
+# ★ 핵심 수정: 파일명을 다시 기존 txt로 변경!
+# (하지만 내용은 JSON 형식으로 저장할 겁니다)
+LOG_FILE = "last_sent.txt"
 # =========================================
 
 def install_heavy_libraries():
@@ -35,22 +37,26 @@ def send_telegram_msg(text):
     except: pass
 
 def read_last_data():
-    """저장된 이전 데이터를 불러옵니다"""
+    """txt 파일이지만 내부의 JSON 데이터를 읽어옵니다"""
     if os.path.exists(LOG_FILE):
         try:
             with open(LOG_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                content = f.read().strip()
+                if not content: return {}
+                return json.loads(content) # 문자열을 딕셔너리로 변환
         except:
+            # 기존에 단순 텍스트가 들어있어서 에러가 나면, 
+            # 그냥 빈 상태로 시작해서 새로 덮어씁니다.
             return {}
     return {}
 
 def save_current_data(data_dict):
-    """현재 데이터를 파일로 저장합니다"""
+    """현재 데이터를 txt 파일에 JSON 형식으로 저장합니다"""
     with open(LOG_FILE, "w", encoding="utf-8") as f:
         json.dump(data_dict, f, ensure_ascii=False, indent=4)
 
 def crawl_weather_site():
-    print(f"[{datetime.now()}] 봇 실행 (JSON 저장 및 Update 표시 기능)")
+    print(f"[{datetime.now()}] 봇 실행 (TXT 파일에 JSON 저장 방식)")
 
     install_heavy_libraries()
     from selenium import webdriver
@@ -66,7 +72,6 @@ def crawl_weather_site():
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
     
     try:
-        # [수정] 오타 없이 주소 입력
         url = "https://www.weather.go.kr/w/special-report/overall.do"
         driver.get(url)
         driver.implicitly_wait(10)
@@ -79,7 +84,7 @@ def crawl_weather_site():
         last_type = ""
         last_level = ""
 
-        # 1. 현재 기상청 데이터 수집
+        # 데이터 수집
         for row in rows:
             cols = row.find_elements(By.TAG_NAME, "td")
             if len(cols) < 2: continue
@@ -98,7 +103,6 @@ def crawl_weather_site():
             clear_notice = cols[col_idx+3].text.strip()
             
             for target in TARGET_AREAS:
-                # 공백 제거 비교로 정확도 향상
                 if target.replace(" ", "") in raw_area_text.replace(" ", ""):
                     unique_key = f"{target}_{last_type}"
                     current_data[unique_key] = {
@@ -110,10 +114,9 @@ def crawl_weather_site():
                         "clear": clear_notice if clear_notice else "-"
                     }
 
-        # 2. 과거 데이터와 비교 (Update 및 해제 감지)
+        # 비교 로직
         last_data = read_last_data()
         
-        # 해제된 항목 찾기 (이전엔 있었는데 지금은 없는 키)
         released_items = []
         for key, val in last_data.items():
             if key not in current_data:
@@ -122,7 +125,6 @@ def crawl_weather_site():
         active_messages = []
         is_changed = False 
 
-        # 현재 항목들 순회하며 변동 체크
         for key, curr_val in current_data.items():
             prev_val = last_data.get(key)
             
@@ -131,7 +133,6 @@ def crawl_weather_site():
             display_effective = curr_val['effective']
             display_clear = curr_val['clear']
 
-            # 이전 기록이 있다면 비교 시작
             if prev_val:
                 if curr_val['level'] != prev_val['level']:
                     display_level += "(Update)"
@@ -146,7 +147,6 @@ def crawl_weather_site():
                     display_clear += "(Update)"
                     is_changed = True
             else:
-                # 새로운 특보면 무조건 변경으로 간주
                 is_changed = True
 
             msg_chunk = (
@@ -162,22 +162,17 @@ def crawl_weather_site():
         if released_items:
             is_changed = True
 
-        # 3. 전송 여부 판단 및 메시지 발송
-        
-        # [상황 1] 아무 특보도 없고, 해제된 것도 없음 -> 조용히 저장만 하고 끝
+        # 전송 판단
         if not current_data and not released_items:
             print(">> 특보 없음")
             save_current_data({})
             return
 
-        # [상황 2] 변동 사항 없음 -> 전송 안 함
         if not is_changed:
             print(">> [중복] 변동 사항 없음.")
-            # 데이터는 최신화해서 저장해둠 (혹시 모를 오류 방지)
             save_current_data(current_data)
             return
 
-        # [상황 3] 전체 해제 발생 -> 해제 알림 전송
         if not current_data and released_items:
             print(">> [전송] 전체 해제 알림")
             released_str = "\n".join(released_items)
@@ -191,7 +186,6 @@ def crawl_weather_site():
             save_current_data({})
             return
 
-        # [상황 4] 신규/변경/부분해제 -> 상세 알림 전송
         print(">> [전송] 특보 현황 알림")
         body_str = "\n\n".join(active_messages)
         footer_str = ""
@@ -207,14 +201,10 @@ def crawl_weather_site():
         )
         
         send_telegram_msg(final_msg)
-        
-        # ★ 중요: (Update) 글자가 없는 '원본 데이터'를 저장해야 다음 비교가 정확함
         save_current_data(current_data)
 
     except Exception as e:
-        print(f"에러 발생: {e}")
-        # 에러 나도 텔레그램으로 알려주면 좋음 (디버깅용)
-        # send_telegram_msg(f"⚠️ 봇 오류 발생: {e}") 
+        print(f"에러: {e}")
     finally:
         driver.quit()
 
