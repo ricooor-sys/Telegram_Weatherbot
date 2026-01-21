@@ -3,13 +3,13 @@ name: 기상 감시 봇
 on:
   schedule:
     - cron: '*/10 * * * *'  # 10분 간격
-  workflow_dispatch:      # 수동 실행
+  workflow_dispatch:      # 수동 실행 버튼
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # 저장소에 파일 쓸 권한 (필수)
 
     steps:
       - name: 코드 가져오기
@@ -25,16 +25,19 @@ jobs:
 
       - name: 봇 실행
         env:
+          # Secrets에 넣어둔 토큰을 꺼내서 파이썬에게 전달
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
 
-      # ★★★ 여기가 수정된 핵심입니다! ★★★
+      # ★★★ 여기가 수정되었습니다! ★★★
       - name: 기록 저장 (JSON 데이터)
         run: |
           git config --global user.name "WeatherBot"
           git config --global user.email "bot@noreply.github.com"
-          # 기존 txt 파일 대신 json 파일을 저장하도록 변경
+          
+          # [중요] 이제 txt가 아니라 json 파일을 저장합니다!
           git add last_sent_data.json || true
+          
           git commit -m "Update weather status data" || true
           git push
