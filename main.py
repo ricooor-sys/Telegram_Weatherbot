@@ -15,7 +15,7 @@ TARGET_AREAS = [
 
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
-LOG_FILE = "last_sent_data.json" # 데이터 구조 저장을 위해 파일명 변경
+LOG_FILE = "last_sent_data.json" # ★ 중요: json 파일 사용
 # =========================================
 
 def install_heavy_libraries():
@@ -40,7 +40,7 @@ def read_last_data():
             with open(LOG_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         except:
-            return {} # 파일이 깨졌거나 형식이 다르면 빈 딕셔너리 반환
+            return {}
     return {}
 
 def save_current_data(data_dict):
@@ -65,168 +65,4 @@ def crawl_weather_site():
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
     
     try:
-        url = "https://www.weather.go.kr/w/special-report/overall.do"
-        driver.get(url)
-        driver.implicitly_wait(10)
-        time.sleep(2)
-
-        tbody = driver.find_element(By.CSS_SELECTOR, "table tbody")
-        rows = tbody.find_elements(By.TAG_NAME, "tr")
-        
-        # 현재 크롤링한 데이터를 저장할 딕셔너리
-        # Key: "지역명_특보종류" (고유 ID), Value: 세부정보 dict
-        current_data = {}
-        
-        last_type = ""
-        last_level = ""
-
-        for row in rows:
-            cols = row.find_elements(By.TAG_NAME, "td")
-            if len(cols) < 2: continue
-            
-            col_idx = 0
-            if len(cols) == 6:
-                last_type = cols[0].text.strip()
-                last_level = cols[1].text.strip()
-                col_idx = 2
-            elif len(cols) == 4:
-                col_idx = 0
-
-            raw_area_text = cols[col_idx].text.strip()
-            announce_time = cols[col_idx+1].text.strip()
-            effect_time = cols[col_idx+2].text.strip()
-            clear_notice = cols[col_idx+3].text.strip()
-            
-            # [지역 필터링 및 데이터 구조화]
-            for target in TARGET_AREAS:
-                # 공백 제거 후 비교
-                if target.replace(" ", "") in raw_area_text.replace(" ", ""):
-                    # 고유 키 생성 (예: 보령시_강풍)
-                    unique_key = f"{target}_{last_type}"
-                    
-                    # 데이터 저장
-                    current_data[unique_key] = {
-                        "area": target,
-                        "type": last_type,
-                        "level": last_level,
-                        "announce": announce_time,
-                        "effective": effect_time,
-                        "clear": clear_notice if clear_notice else "-"
-                    }
-
-        # ----------------------------------------------------
-        # [데이터 비교 로직] 이전 상태(last_data) vs 현재 상태(current_data)
-        # ----------------------------------------------------
-        last_data = read_last_data()
-        
-        # 1. 해제된 특보 찾기 (이전엔 있었는데 지금은 없는 키)
-        released_items = []
-        for key, val in last_data.items():
-            if key not in current_data:
-                # 해제됨!
-                released_items.append(f"* {val['area']} {val['type']} {val['level']} 해제")
-
-        # 2. 현재 특보 메시지 생성 (Update 체크 포함)
-        active_messages = []
-        is_changed = False # 변동 사항이 있는지 체크
-
-        for key, curr_val in current_data.items():
-            prev_val = last_data.get(key)
-            
-            # (Update) 태그 붙이기 로직
-            display_level = curr_val['level']
-            display_announce = curr_val['announce']
-            display_effective = curr_val['effective']
-            display_clear = curr_val['clear']
-
-            # 이전 데이터가 있고, 값이 다르면 (Update) 추가
-            if prev_val:
-                if curr_val['level'] != prev_val['level']:
-                    display_level += "(Update)"
-                    is_changed = True
-                if curr_val['announce'] != prev_val['announce']:
-                    display_announce += "(Update)"
-                    is_changed = True
-                if curr_val['effective'] != prev_val['effective']:
-                    display_effective += "(Update)"
-                    is_changed = True
-                if curr_val['clear'] != prev_val['clear']:
-                    display_clear += "(Update)"
-                    is_changed = True
-            else:
-                # 새로운 특보임 (New)
-                is_changed = True
-
-            msg_chunk = (
-                f"특보 : {curr_val['type']}\n"
-                f"수준 : {display_level}\n"
-                f"해당지역 : {curr_val['area']}\n"
-                f"발표시각 : {display_announce}\n"
-                f"발효시각 : {display_effective}\n"
-                f"해제예고 : {display_clear}"
-            )
-            active_messages.append(msg_chunk)
-
-        # 3. 해제된 항목이 있어도 '변동'으로 취급
-        if released_items:
-            is_changed = True
-
-        # ----------------------------------------------------
-        # [메시지 전송 로직]
-        # ----------------------------------------------------
-        
-        # CASE 1: 아무런 특보도 없고, 해제된 것도 없음 (완전 평온)
-        if not current_data and not released_items:
-            print(">> 특보 없음 (이상 무)")
-            save_current_data({}) # 빈 상태 저장
-            return
-
-        # CASE 2: 변동 사항이 없음 (중복)
-        if not is_changed:
-            print(">> [중복] 변동 사항 없음.")
-            return # 전송 안 함
-
-        # CASE 3: 현재 활성 특보가 하나도 없는데 해제된 것만 있음 -> [전체 해제 알림]
-        if not current_data and released_items:
-            print(">> [전송] 전체 해제 알림")
-            released_str = "\n".join(released_items)
-            final_msg = (
-                "🌈 기상특보 해제 🌈\n\n"
-                "지정된 구역의 모든 특보가 해제되었습니다.\n"
-                f"{released_str}\n"
-                "(상황 종료)"
-            )
-            send_telegram_msg(final_msg)
-            save_current_data({})
-            return
-
-        # CASE 4: 활성 특보가 있음 (새로 생김 or 업데이트 or 일부 해제) -> [특보 발표 알림]
-        print(">> [전송] 특보 현황 알림")
-        
-        body_str = "\n\n".join(active_messages)
-        
-        # 해제된 항목이 있다면 하단에 붙이기
-        footer_str = ""
-        if released_items:
-            footer_str = "\n\n" + "\n".join(released_items)
-
-        final_msg = (
-            "🚨 기상특보 발표 🚨\n\n"
-            f"감시구역: {TARGET_AREAS}\n\n"
-            "새로운 특보가 발표되었습니다.\n\n"
-            f"{body_str}"
-            f"{footer_str}"
-        )
-        
-        send_telegram_msg(final_msg)
-        
-        # 중요: (Update) 태그가 없는 원본 데이터를 저장해야 다음 비교 때 정상 작동함
-        save_current_data(current_data)
-
-    except Exception as e:
-        print(f"에러: {e}")
-    finally:
-        driver.quit()
-
-if __name__ == "__main__":
-    crawl_weather_site()
+        url = "
