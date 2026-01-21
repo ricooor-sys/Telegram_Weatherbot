@@ -9,7 +9,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # 1단계 설정을 했어도 명시적으로 적어줍니다.
 
     steps:
       - name: 코드 가져오기
@@ -29,17 +29,21 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
 
-      - name: 기록 저장 (충돌 방지 로직 추가)
+      - name: 기록 저장 (확실한 저장 로직)
         run: |
+          # 봇 계정 설정
           git config --global user.name "WeatherBot"
           git config --global user.email "bot@noreply.github.com"
           
-          # [핵심 수정] 1. 최신 코드를 먼저 당겨옵니다 (Pull)
-          git pull
+          # 파일이 있는지 확인하고 추가
+          git add last_sent_data.json
           
-          # 2. json 파일 추가
-          git add last_sent_data.json || true
-          
-          # 3. 저장 및 업로드
-          git commit -m "Update weather status data" || true
-          git push
+          # 변경사항이 있는지 확인
+          # (변경사항이 없으면 커밋하지 않고 넘어감 -> 에러 방지)
+          if git diff --staged --quiet; then
+            echo ">> 변경된 내용이 없습니다. 저장을 건너뜁니다."
+          else
+            echo ">> 변경사항 발견! 저장을 시도합니다."
+            git commit -m "Update weather data [skip ci]"
+            git push
+          fi
